@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, Modal, TextInput
+  Alert, ActivityIndicator, Modal, TextInput,
+  StyleSheet, Platform, StatusBar, RefreshControl
 } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
-import { QrCode, Smartphone, User } from 'lucide-react-native';
+import * as Notifications from 'expo-notifications';
+import { QrCode, Smartphone, User, X } from 'lucide-react-native';
 import { db, auth } from '../../firebase';
 import {
   collection, addDoc, doc, getDocs, query,
-  orderBy, getDoc
+  orderBy, getDoc, where
 } from 'firebase/firestore';
 
 interface QueueItem {
@@ -37,7 +39,11 @@ export default function CustomerView() {
   const [custPurpose, setCustPurpose] = useState('');
   const [shopId1, setShopId] = useState('');
 
-  // Request camera permission
+    const [refreshing, setRefreshing] = useState(false); // for pull-to-refresh
+  // Remember last positions to trigger notifications if user moves up
+  const lastPositions = useRef<Record<string, number>>({});
+
+  // ===== Camera permission
   useEffect(() => {
     (async () => {
       const { status } = await Camera.requestCameraPermissionsAsync();
@@ -46,15 +52,38 @@ export default function CustomerView() {
     })();
   }, []);
 
-  // Fetch today's queues
+  
+
+  // ===== Notifications permission
+  useEffect(() => {
+    (async () => {
+      await Notifications.requestPermissionsAsync();
+      await Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+    })();
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchQueues();
+    setRefreshing(false);
+  };
+
+  // ===== Fetch today's queues
   const fetchQueues = async () => {
     setLoading(true);
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-
       const shopsSnap = await getDocs(collection(db, 'shops'));
-      let queues: QueueItem[] = [];
+      const queues: QueueItem[] = [];
 
       for (const shopDoc of shopsSnap.docs) {
         const ownerId = shopDoc.data().ownerId;
@@ -72,17 +101,15 @@ export default function CustomerView() {
           if (queueData.date?.toDate) queueDate = queueData.date.toDate();
           else queueDate = new Date(queueData.date);
 
-          // Only today's queues
           if (
             queueDate.getFullYear() !== today.getFullYear() ||
             queueDate.getMonth() !== today.getMonth() ||
             queueDate.getDate() !== today.getDate()
           ) continue;
 
-          // Fetch customers
-         // Fetch customers
-            // Fetch customers
-            const customersSnap = await getDocs(collection(db, `shops/${ownerId}/queues/${qDoc.id}/customers`));
+          const customersSnap = await getDocs(
+            collection(db, `shops/${ownerId}/queues/${qDoc.id}/customers`)
+          );
 
           const customers = customersSnap.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -90,25 +117,38 @@ export default function CustomerView() {
 
           customers.forEach((c, index) => {
             if (c.userId === auth.currentUser?.uid) {
+              const position = index + 1;
+              const waitTime = customers
+                .slice(0, index)
+                .reduce((sum, cust) => sum + (cust.duration || 20), 0);
+
               queues.push({
                 id: c.id,
                 queueId: qDoc.id,
                 shopName: shopDoc.data().name,
-                position: index + 1,           // correct relative to full queue
-                waitTime: (index +1) * (c.duration || 20),
+                position,
+                waitTime,
                 totalCustomers: customers.length,
                 customer: c,
               });
+
+              // ---- Notification: if moved up
+              const prev = lastPositions.current[c.id];
+              if (prev && position < prev) {
+                Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: `Queue Update: ${shopDoc.data().name}`,
+                    body: `You're now #${position} in line.`,
+                  },
+                  trigger: null,
+                });
+              }
+              lastPositions.current[c.id] = position;
             }
           });
-
-
-          };
         }
-      
-      
-
-      setCurrentQueues(queues.slice(0, 4)); // max 4 queues
+      }
+      setCurrentQueues(queues.slice(0, 4));
     } catch (err) {
       console.error(err);
       Alert.alert('Error', 'Failed to fetch queues.');
@@ -117,73 +157,83 @@ export default function CustomerView() {
     }
   };
 
+  // Initial & auto refresh
   useEffect(() => {
     fetchQueues();
+    const interval = setInterval(fetchQueues, 30000); // every 30 sec
+    return () => clearInterval(interval);
   }, []);
 
-  // Handle QR scan
+  // ===== QR Scan
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     setScanning(false);
     try {
       const parsed = JSON.parse(data);
       setShopForModal({ shopId: parsed.id, shopName: parsed.name });
       setCustomerModal(true);
-    } catch (err) {
-      console.error(err);
+    } catch {
       Alert.alert('Error', 'Invalid QR code.');
     }
   };
 
-  // Manual join
-  const joinById = async (shopId: string) => {
-    if (!shopId) return;
+  // ===== Manual join
+  const joinById = async (enteredId: string) => {
+    if (!enteredId.trim()) return;
+
     try {
-      const shopDoc = await getDoc(doc(db, 'shops', shopId));
-      if (!shopDoc.exists()) return Alert.alert('Error', 'Shop not found');
-      setShopForModal({ shopId, shopName: shopDoc.data()?.name || '' });
+      // Look up a shop by its custom/public ID (not the Firestore doc ID)
+      const q = query(collection(db, 'shops'), where('shopId', '==', enteredId.trim()));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        Alert.alert('Not Found', `No shop found with ID: ${enteredId}`);
+        return;
+      }
+
+      // Assume first match is the correct shop
+      const shopDoc = snap.docs[0];
+      const shopData = shopDoc.data();
+
+      // Save info for the modal and open the customer form
+      setShopForModal({ shopId: shopDoc.id, shopName: shopData.name || '' });
       setManualModal(false);
       setCustomerModal(true);
+
     } catch (err) {
-      console.error(err);
-      Alert.alert('Error', 'Failed to join queue.');
+      console.error('Join by ID error:', err);
+      Alert.alert('Error', 'Failed to find shop. Please try again.');
     }
   };
 
-  // Confirm join queue
+  // ===== Confirm join
   const confirmJoinQueue = async () => {
     if (!custName || !custPhone || !custPurpose || !shopForModal) {
       return Alert.alert('Error', 'Please fill all fields');
     }
-
     if (currentQueues.length >= 4) {
       return Alert.alert('Limit reached', 'You can join up to 4 queues at the same time');
     }
-
     try {
       const queuesRef = collection(db, `shops/${shopId1}/queues`);
       const queuesSnap = await getDocs(queuesRef);
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-
-      // Find today's queue
       let queueDoc = queuesSnap.docs.find(doc => {
         const qDate = doc.data().date?.toDate ? doc.data().date.toDate() : new Date(doc.data().date);
-        return (
-          qDate.getFullYear() === today.getFullYear() &&
-          qDate.getMonth() === today.getMonth() &&
-          qDate.getDate() === today.getDate()
-        );
+        return qDate.toDateString() === today.toDateString();
       });
 
       let queueId = '';
       let nextTimestamp = Date.now();
-
       if (queueDoc) {
         queueId = queueDoc.id;
-        const customersSnap = await getDocs(collection(db, `shops/${shopId1}/queues/${queueId}/customers`));
+        const customersSnap = await getDocs(
+          collection(db, `shops/${shopId1}/queues/${queueId}/customers`)
+        );
         const lastCustomer = customersSnap.docs[customersSnap.docs.length - 1];
-        if (lastCustomer) nextTimestamp = (lastCustomer.data().appointmentTimestamp || Date.now()) + 20 * 60000;
+        if (lastCustomer) nextTimestamp =
+          (lastCustomer.data().appointmentTimestamp || Date.now()) + 20 * 60000;
       } else {
         const newQueueRef = await addDoc(queuesRef, { date: new Date(), createdAt: Date.now() });
         queueId = newQueueRef.id;
@@ -203,9 +253,7 @@ export default function CustomerView() {
 
       Alert.alert('Success', `You joined the queue for ${shopForModal.shopName}`);
       setCustomerModal(false);
-      setCustName('');
-      setCustPhone('');
-      setCustPurpose('');
+      setCustName(''); setCustPhone(''); setCustPurpose('');
       setShopForModal(null);
       fetchQueues();
     } catch (err) {
@@ -214,165 +262,535 @@ export default function CustomerView() {
     }
   };
 
+  // ====== Camera Scanner UI
   if (scanning) {
-    if (!hasPermission) return <Text>No camera permission</Text>;
+    if (!hasPermission) return <Text style={styles.errorText}>No camera permission</Text>;
     return (
-      <CameraView
-        style={{ flex: 1 }}
-        onBarcodeScanned={handleBarCodeScanned}
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-      >
-        <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end', padding: 20 }}>
-          <TouchableOpacity
-            onPress={() => setScanning(false)}
-            style={{ alignSelf: 'center', backgroundColor: '#fff', padding: 10, borderRadius: 8 }}
-          >
-            <Text style={{ color: '#000', fontWeight: 'bold' }}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </CameraView>
+      <View style={styles.cameraContainer}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          onBarcodeScanned={handleBarCodeScanned}
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        >
+          <View style={styles.cameraOverlay}>
+            <View style={styles.cameraFrame} />
+            <Text style={styles.cameraText}>Align QR code within the frame</Text>
+            <TouchableOpacity
+              onPress={() => setScanning(false)}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </CameraView>
+      </View>
     );
   }
 
+  // ====== Main UI
   return (
-    <View style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#2C6BED" />
+      
       {/* Header */}
-      <View style={{ backgroundColor: '#2C6BED', paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
           <View>
-            <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>NextUp</Text>
-            <Text style={{ color: '#cce0ff', marginTop: 4 }}>Your turn is almost here</Text>
+            <Text style={styles.appName}>NextUp</Text>
+            <Text style={styles.appTagline}>Your turn is almost here</Text>
           </View>
-          <TouchableOpacity style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 10, borderRadius: 50 }}>
+          <TouchableOpacity style={styles.userButton}>
             <User color="white" size={24} />
           </TouchableOpacity>
         </View>
 
-        <View style={{ flexDirection: 'row', marginTop: 16 }}>
+        <View style={styles.scanButtons}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: 'white', marginRight: 8, padding: 16, borderRadius: 20, alignItems: 'center' }}
+            style={styles.scanButton}
             onPress={() => setScanning(true)}
           >
             <QrCode color="#2C6BED" size={32} />
-            <Text style={{ color: '#2C6BED', marginTop: 8, fontWeight: '600' }}>Scan QR</Text>
+            <Text style={styles.scanButtonText}>Scan QR</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: 'white', marginLeft: 8, padding: 16, borderRadius: 20, alignItems: 'center' }}
+            style={styles.scanButton}
             onPress={() => setManualModal(true)}
           >
             <Smartphone color="#2C6BED" size={32} />
-            <Text style={{ color: '#2C6BED', marginTop: 8, fontWeight: '600' }}>Enter ID</Text>
+            <Text style={styles.scanButtonText}>Enter ID</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Queue List */}
-      <ScrollView style={{ flex: 1, padding: 16 }}>
+      <ScrollView
+          style={styles.queueList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#2C6BED']}
+              tintColor="#2C6BED"
+            />
+          }
+        >
+        <Text style={styles.sectionTitle}>Your Queues</Text>
+        
+        
         {loading ? (
-          <ActivityIndicator />
+          <ActivityIndicator size="large" color="#2C6BED" style={styles.loader} />
         ) : currentQueues.length === 0 ? (
-          <Text style={{ textAlign: 'center', marginTop: 20 }}>No queues for today</Text>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>No queues for today</Text>
+            <Text style={styles.emptyStateSubtext}>Scan a QR code or enter a shop ID to join a queue</Text>
+          </View>
         ) : (
-          currentQueues.map((q, i) => {
+          currentQueues.map(q => {
             const progress = Math.min(q.position / q.totalCustomers, 1);
+            const avgWait = q.totalCustomers
+              ? Math.round(
+                  currentQueues.reduce((acc, item) => acc + item.waitTime, 0) /
+                  currentQueues.length
+                )
+              : 0;
             return (
-              <View key={q.id} style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, marginBottom: 16, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 10 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{q.customer.customerName}</Text>
-                  <Text style={{ color: '#888', fontSize: 12 }}>{q.shopName}</Text>
+              <View
+                key={q.id}
+                style={styles.queueCard}
+              >
+                <View style={styles.queueHeader}>
+                  <Text style={styles.customerName}>{q.customer.customerName}</Text>
+                  <Text style={styles.shopName}>{q.shopName}</Text>
                 </View>
-                <Text>Position: #{q.position} / {q.totalCustomers}</Text>
-                <Text>Estimated Wait: {q.waitTime} min</Text>
+                
+                <View style={styles.queueDetails}>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Position</Text>
+                    <Text style={styles.detailValue}>#{q.position} of {q.totalCustomers}</Text>
+                  </View>
+                  
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Est. Wait</Text>
+                    <Text style={styles.detailValue}>{q.waitTime} min</Text>
+                  </View>
+                  
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Avg. Wait</Text>
+                    <Text style={styles.detailValue}>{avgWait} min</Text>
+                  </View>
+                </View>
+                
+                <Text style={styles.joinTime}>
+                  Joined: {new Date(q.customer.createdAt).toLocaleTimeString()}
+                </Text>
 
-                <View style={{ marginTop: 8, height: 12, backgroundColor: '#eee', borderRadius: 6, overflow: 'hidden' }}>
-                  <View style={{ width: `${progress * 100}%`, height: '100%', backgroundColor: '#2C6BED', borderRadius: 6 }} />
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressBar}>
+                    <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                  </View>
+                  <Text style={styles.progressText}>
+                    {Math.round(progress * 100)}% 
+                  </Text>
                 </View>
               </View>
             );
           })
         )}
-
-        {/* Join Queue Button */}
-        <TouchableOpacity
-          onPress={() => {
-            if (currentQueues.length >= 4) {
-              Alert.alert('Limit reached', 'You can join up to 4 queues at the same time');
-              return;
-            }
-            setManualModal(true);
-          }}
-          style={{ backgroundColor: '#2C6BED', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 12 }}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Join New Queue</Text>
-        </TouchableOpacity>
       </ScrollView>
 
-      {/* Manual ID Modal */}
-      <Modal visible={manualModal} transparent animationType="slide">
-        <View style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 16 }}>
-          <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 20 }}>
-            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Enter Shop ID</Text>
+      {/* Join New Queue Button */}
+      <TouchableOpacity
+        onPress={() => {
+          if (currentQueues.length >= 4) {
+            Alert.alert('Limit reached', 'You can join up to 4 queues at the same time');
+            return;
+          }
+          setManualModal(true);
+        }}
+        style={styles.joinButton}
+      >
+        <Text style={styles.joinButtonText}>Join New Queue</Text>
+      </TouchableOpacity>
+
+      {/* ---- Manual ID Modal ---- */}
+      <Modal visible={manualModal} transparent animationType="fade">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Enter Shop ID</Text>
+              <TouchableOpacity onPress={() => setManualModal(false)} style={styles.closeButton}>
+                <X size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
             <TextInput
               placeholder="Shop ID"
+              placeholderTextColor="#999"
               value={manualId}
               onChangeText={setManualId}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 20 }}
+              style={styles.input}
             />
-            <TouchableOpacity
-              onPress={() => joinById(manualId)}
-              style={{ backgroundColor: '#2C6BED', padding: 12, borderRadius: 8 }}
-            >
-              <Text style={{ color: 'white', textAlign: 'center', fontWeight: 'bold' }}>Next</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setManualModal(false)} style={{ marginTop: 10 }}>
-              <Text style={{ textAlign: 'center', color: 'red' }}>Cancel</Text>
-            </TouchableOpacity>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                onPress={() => joinById(manualId)}
+                style={[styles.modalButton, styles.primaryButton]}
+              >
+                <Text style={styles.primaryButtonText}>Next</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={() => setManualModal(false)} 
+                style={[styles.modalButton, styles.secondaryButton]}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
 
-      {/* Customer Info Modal */}
-      <Modal visible={customerModal} transparent animationType="slide">
-        <View style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 16 }}>
-          <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 20 }}>
-            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>
-              Join Queue at {shopForModal?.shopName}
-            </Text>
-
+      {/* ---- Customer Info Modal ---- */}
+      <Modal visible={customerModal} transparent animationType="fade">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Join Queue at {shopForModal?.shopName}
+              </Text>
+              <TouchableOpacity onPress={() => setCustomerModal(false)} style={styles.closeButton}>
+                <X size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
             <TextInput
               placeholder="Name"
+              placeholderTextColor="#999"
               value={custName}
               onChangeText={setCustName}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
+              style={styles.input}
             />
+            
             <TextInput
               placeholder="Phone"
+              placeholderTextColor="#999"
               value={custPhone}
               onChangeText={setCustPhone}
               keyboardType="phone-pad"
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
+              style={styles.input}
             />
+            
             <TextInput
               placeholder="Purpose"
+              placeholderTextColor="#999"
               value={custPurpose}
               onChangeText={setCustPurpose}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 20 }}
+              style={styles.input}
             />
 
-            <TouchableOpacity
-              onPress={confirmJoinQueue}
-              style={{ backgroundColor: '#2C6BED', padding: 12, borderRadius: 8 }}
-            >
-              <Text style={{ color: 'white', textAlign: 'center', fontWeight: 'bold' }}>Join Queue</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setCustomerModal(false)} style={{ marginTop: 10 }}>
-              <Text style={{ textAlign: 'center', color: 'red' }}>Cancel</Text>
-            </TouchableOpacity>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                onPress={confirmJoinQueue}
+                style={[styles.modalButton, styles.primaryButton]}
+              >
+                <Text style={styles.primaryButtonText}>Join Queue</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={() => setCustomerModal(false)} 
+                style={[styles.modalButton, styles.secondaryButton]}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    backgroundColor: '#2C6BED',
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  appName: {
+    color: 'white',
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  appTagline: {
+    color: '#cce0ff',
+    marginTop: 4,
+    fontSize: 14,
+  },
+  userButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 10,
+    borderRadius: 50,
+  },
+  scanButtons: {
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  scanButton: {
+    flex: 1,
+    backgroundColor: 'white',
+    marginHorizontal: 8,
+    padding: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  scanButtonText: {
+    color: '#2C6BED',
+    marginTop: 8,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  queueList: {
+    flex: 1,
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    color: '#333',
+  },
+  loader: {
+    marginTop: 40,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 8,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  queueCard: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  queueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  customerName: {
+    fontWeight: 'bold',
+    fontSize: 18,
+    color: '#333',
+  },
+  shopName: {
+    color: '#2C6BED',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  queueDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  detailItem: {
+    alignItems: 'center',
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  joinTime: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  progressContainer: {
+    marginTop: 8,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#eee',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#2C6BED',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'right',
+  },
+  joinButton: {
+    backgroundColor: '#2C6BED',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    margin: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  joinButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontWeight: 'bold',
+    fontSize: 20,
+    color: '#333',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  primaryButton: {
+    backgroundColor: '#2C6BED',
+  },
+  primaryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  secondaryButton: {
+    backgroundColor: '#f0f0f0',
+  },
+  secondaryButtonText: {
+    color: '#666',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  cameraContainer: {
+    flex: 1,
+  },
+  cameraOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraFrame: {
+    width: 250,
+    height: 250,
+    borderWidth: 2,
+    borderColor: 'white',
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  cameraText: {
+    color: 'white',
+    fontSize: 16,
+    marginTop: 20,
+    textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 8,
+    borderRadius: 8,
+  },
+  cancelButton: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+  },
+  cancelButtonText: {
+    color: '#2C6BED',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  errorText: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+    color: '#666',
+  },
+});
