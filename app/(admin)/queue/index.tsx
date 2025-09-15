@@ -15,6 +15,7 @@ export default function QueuePage() {
   const router = useRouter();
   const shopId = auth.currentUser?.uid;
 
+
   // Fetch queues and auto-create today's queue if not exist
   useEffect(() => {
     const initQueues = async () => {
@@ -22,9 +23,11 @@ export default function QueuePage() {
 
       setLoading(true);
       try {
+        console.log("Initializing queues for shopId:", shopId);
         const q = query(collection(db, `shops/${shopId}/queues`), orderBy('date', 'asc'));
         const snapshot = await getDocs(q);
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log("Fetched queues:", data);
 
         // Check if today's queue exists
         const today = new Date();
@@ -76,6 +79,7 @@ export default function QueuePage() {
       const snapshot = await getDocs(query(collection(db, `shops/${shopId}/queues`), orderBy('date', 'asc')));
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setQueues(data);
+      console.log("Queues after creation:", data);
     } catch (error) {
       console.error(error);
       Alert.alert('Error', 'Failed to create queue');
