@@ -7,6 +7,7 @@ type EntypoIconName = "home" | "clipboard" | "user" | "cog";
 const tabs: { label: string; name: string; icon: EntypoIconName }[] = [
   { label: "Home", name: "home", icon: "home" },
   { label: "Register Shop", name: "RegisterShop", icon: "clipboard" },
+  { label: "queue", name: "queue", icon: "user" },
   { label: "Profile", name: "profile", icon: "user" },
   { label: "Settings", name: "setting", icon: "cog" }
 ];

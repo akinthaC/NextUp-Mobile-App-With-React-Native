@@ -1,16 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  StyleSheet,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import {
-  Users, Clock, Play, RotateCcw, Plus, Bell,
-  Calendar, TrendingUp
+  Users,
+  Clock,
+  Play,
+  RotateCcw,
+  Plus,
+  Bell,
+  Calendar,
+  TrendingUp,
+  X,
+  User,
+  ChevronRight,
+  MoreVertical,
 } from 'lucide-react-native';
 import { db, auth } from '../../firebase';
-import {
-  collection, query, getDocs, orderBy, updateDoc, doc
-} from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, getDoc } from 'firebase/firestore';
 
 export default function BusinessView() {
   const [queueActive, setQueueActive] = useState(true);
@@ -55,14 +70,12 @@ export default function BusinessView() {
   // ---------- Merge & Calculate Positions ----------
   const mergeAndCalculateQueue = (customerList: any[]) => {
     const merged = [...customerList].sort((a, b) => {
-      const aTime = (a.appointmentTimestamp instanceof Date)
-        ? a.appointmentTimestamp.getTime()
-        : (a.createdAt instanceof Date ? a.createdAt.getTime() : 0);
-
-      const bTime = (b.appointmentTimestamp instanceof Date)
-        ? b.appointmentTimestamp.getTime()
-        : (b.createdAt instanceof Date ? b.createdAt.getTime() : 0);
-
+      const aTime = a.appointmentTimestamp
+        ? a.appointmentTimestamp
+        : a.createdAt?.getTime() ?? 0;
+      const bTime = b.appointmentTimestamp
+        ? b.appointmentTimestamp
+        : b.createdAt?.getTime() ?? 0;
       return aTime - bTime;
     });
 
@@ -77,9 +90,12 @@ export default function BusinessView() {
 
   // ---------- Fetch Today's Queue ----------
   useEffect(() => {
-    const fetchTodayQueue = async () => {
+    let interval: any;
+
+    const fetchWaitingCustomers = async () => {
       if (!shop) return;
       setLoadingQueue(true);
+
       try {
         const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
         let allCustomers: any[] = [];
@@ -92,42 +108,69 @@ export default function BusinessView() {
           const today = new Date();
           if (queueDate.toDateString() !== today.toDateString()) continue;
 
-          const customersSnap = await getDocs(collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`));
-          const customersData = customersSnap.docs.map(c => {
-            const cData = c.data();
-            return {
-              id: c.id,
-              queueId: queueDoc.id,
-              name: cData.customerName,
-              createdAt: cData.createdAt?.toDate ? cData.createdAt.toDate() : new Date(),
-              appointmentTimestamp: cData.appointmentTimestamp?.toDate ? cData.appointmentTimestamp.toDate() : null,
-              waitTime: cData.waitTime || 0,
-              ...cData
-            };
-          });
+          const customersSnap = await getDocs(
+            collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
+          );
+
+          const customersData = customersSnap.docs
+            .map(c => {
+              const cData = c.data();
+              if (cData.status && cData.status !== "waiting") return null;
+
+              const apptTime =
+                typeof cData.appointmentTimestamp === 'number'
+                  ? cData.appointmentTimestamp
+                  : cData.appointmentTimestamp?.toMillis?.() ??
+                    cData.appointmentTimestamp?.toDate?.().getTime() ??
+                    null;
+
+              return {
+                id: c.id,
+                queueId: queueDoc.id,
+                name: cData.customerName,
+                createdAt: cData.createdAt?.toDate ? cData.createdAt.toDate() : new Date(),
+                appointmentTimestamp: apptTime,
+                waitTime: cData.waitTime || 0,
+                ...cData,
+              };
+            })
+            .filter(Boolean);
 
           allCustomers = allCustomers.concat(customersData);
         }
 
-        setCustomers(mergeAndCalculateQueue(allCustomers));
+        const sortedCustomers = allCustomers
+          .filter(c => c.appointmentTimestamp)
+          .sort((a, b) => a.appointmentTimestamp - b.appointmentTimestamp);
+
+        setCustomers(mergeAndCalculateQueue(sortedCustomers));
       } catch (err) {
         console.error(err);
       } finally {
         setLoadingQueue(false);
       }
     };
-    fetchTodayQueue();
+
+    // Initial fetch
+    fetchWaitingCustomers();
+
+    // Set interval to refresh every 10 seconds
+    interval = setInterval(fetchWaitingCustomers, 10000);
+
+    // Cleanup on unmount
+    return () => clearInterval(interval);
   }, [shop]);
+
 
   // ---------- Fetch Tomorrow Appointments ----------
   useEffect(() => {
     const fetchTomorrowAppointments = async () => {
       if (!shop) return;
       setLoadingAppointments(true);
+
       try {
         const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
         let allAppointments: any[] = [];
-
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -138,7 +181,10 @@ export default function BusinessView() {
           const queueDate = queueData.date.toDate ? queueData.date.toDate() : queueData.date;
           if (queueDate.toDateString() !== tomorrow.toDateString()) continue;
 
-          const customersSnap = await getDocs(collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`));
+          const customersSnap = await getDocs(
+            collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
+          );
+
           const customersData = customersSnap.docs.map(c => {
             const cData = c.data();
             const appointmentDate = cData.appointmentTimestamp?.toDate
@@ -156,7 +202,7 @@ export default function BusinessView() {
               time: appointmentDate
                 ? appointmentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : '',
-              ...cData
+              ...cData,
             };
           });
 
@@ -171,6 +217,7 @@ export default function BusinessView() {
         setLoadingAppointments(false);
       }
     };
+
     fetchTomorrowAppointments();
   }, [shop]);
 
@@ -178,13 +225,35 @@ export default function BusinessView() {
   const toggleQueue = () => setQueueActive(!queueActive);
 
   const callNextCustomer = async () => {
-    if (!customers.length) return;
+    if (!customers.length) {
+      Alert.alert('Queue Empty', 'No customers are waiting.');
+      return;
+    }
+
     try {
       const next = customers[0];
-      await updateDoc(doc(db, `shops/${shop.id}/queues/${next.queueId}/customers`, next.id), {
-        status: 'served'
-      });
-      setCustomers(prev => prev.slice(1));
+
+      if (!next.queueId || !next.id) {
+        Alert.alert('Error', 'Invalid customer data');
+        return;
+      }
+
+      const customerRef = doc(db, `shops/${shopId}/queues/${next.queueId}/customers/${next.id}`);
+      const customerSnap = await getDoc(customerRef);
+
+      if (!customerSnap.exists()) {
+        Alert.alert('Error', 'Customer document does not exist in Firestore');
+        setCustomers(prev => prev.filter(c => c.id !== next.id));
+        return;
+      }
+
+      // Update Firestore
+      await updateDoc(customerRef, { status: 'served', servedAt: Date.now() });
+
+      // Remove from local list and recalc positions
+      setCustomers(prev => mergeAndCalculateQueue(prev.filter(c => c.id !== next.id)));
+
+      Alert.alert('Next Customer Called', `Customer ${next.name} is being served.`);
     } catch (err) {
       console.error(err);
       Alert.alert('Error', 'Failed to update next customer');
@@ -205,104 +274,141 @@ export default function BusinessView() {
 
   // ---------- Render ----------
   return (
-    <View className="flex-1 bg-gray-50">
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#2C6BED" />
+      
       {/* HEADER */}
-      <View className="bg-teal-600 pt-12 pb-6 px-4">
-        <View className="flex-row justify-between items-center mb-2">
-          <Text className="text-white text-2xl font-bold">NextUp Business</Text>
-          <TouchableOpacity className="bg-teal-500 p-2 rounded-full">
-            <Users color="white" size={24} />
+      <View style={styles.header}>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.appName}>NextUp Business</Text>
+            <Text style={styles.appTagline}>Manage your queue efficiently</Text>
+          </View>
+          <TouchableOpacity style={styles.userButton}>
+            <User color="white" size={24} />
           </TouchableOpacity>
         </View>
+        
         {loadingShop ? (
           <ActivityIndicator color="#fff" />
         ) : shop ? (
-          <>
-            <Text className="text-white text-lg font-semibold">{greeting},</Text>
-            <Text className="text-white text-lg font-semibold">shop {shop.name}</Text>
-            <Text className="text-teal-100 text-sm">{shop.address}</Text>
-          </>
+          <View style={styles.shopInfo}>
+            <Text style={styles.greeting}>{greeting},</Text>
+            <Text style={styles.shopName}>{shop.name}</Text>
+            <Text style={styles.shopAddress}>{shop.address}</Text>
+          </View>
         ) : (
-          <Text className="text-red-200">No shop found</Text>
+          <Text style={styles.errorText}>No shop found</Text>
         )}
-        <Text className="text-teal-100 mt-1">Manage your queue efficiently</Text>
       </View>
 
-      <ScrollView className="flex-1 px-4 py-6" showsVerticalScrollIndicator={false}>
-        {/* Queue Controls */}
-        <View className="bg-white rounded-xl p-5 mb-6 shadow-sm border border-gray-100">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-gray-900 text-lg font-bold">Queue Controls</Text>
-            <TouchableOpacity
-              className={`px-4 py-2 rounded-full ${queueActive ? 'bg-red-100' : 'bg-green-100'}`}
-              onPress={toggleQueue}
-            >
-              <Text className={`font-medium ${queueActive ? 'text-red-600' : 'text-green-600'}`}>
-                {queueActive ? 'Pause' : 'Resume'}
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Queue Overview */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Queue Overview</Text>
+          
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{customers.length}</Text>
+              <Text style={styles.statLabel}>Total in Queue</Text>
+            </View>
+            
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>
+                {customers.length > 0 ? customers[0].waitTime : 0}
               </Text>
-            </TouchableOpacity>
+              <Text style={styles.statLabel}>Next Wait (min)</Text>
+            </View>
+            
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{appointments.length}</Text>
+              <Text style={styles.statLabel}>Tomorrow</Text>
+            </View>
           </View>
 
-          <View className="flex-row gap-3">
-            <TouchableOpacity
-              className="flex-1 bg-teal-600 py-3 rounded-lg flex-row justify-center items-center"
-              onPress={callNextCustomer}
-            >
-              <Play color="white" size={18} />
-              <Text className="text-white font-medium ml-2">Call Next</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              className="flex-1 bg-gray-200 py-3 rounded-lg flex-row justify-center items-center"
-              onPress={resetQueue}
-            >
-              <RotateCcw color="#1A2C3B" size={18} />
-              <Text className="text-gray-900 font-medium ml-2">Reset</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Next Customer */}
+          {customers.length > 0 ? (
+            <View style={styles.nextCustomerCard}>
+              <View style={styles.nextCustomerHeader}>
+                <Text style={styles.nextCustomerTitle}>Next Customer</Text>
+                <View style={styles.waitTimeBadge}>
+                  <Clock color="#2C6BED" size={14} />
+                  <Text style={styles.waitTimeText}>{customers[0].waitTime} min</Text>
+                </View>
+              </View>
+              
+              <Text style={styles.customerName}>{customers[0].name}</Text>
+              <Text style={styles.customerPurpose}>
+                Purpose: {customers[0].purpose || 'Not specified'}
+              </Text>
+              
+              <TouchableOpacity
+                style={styles.callNextButton}
+                onPress={callNextCustomer}
+              >
+                <Play color="white" size={18} />
+                <Text style={styles.callNextText}>Call Next Customer</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.emptyQueue}>
+              <Users color="#ccc" size={40} />
+              <Text style={styles.emptyQueueText}>No customers in queue</Text>
+            </View>
+          )}
         </View>
 
         {/* Customer Queue */}
-        <View className="mb-6">
-          <Text className="text-gray-900 text-lg font-bold mb-3">
-            Customer Queue ({customers.length})
-          </Text>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Customer Queue ({customers.length})</Text>
+            <TouchableOpacity>
+              <MoreVertical color="#666" size={20} />
+            </TouchableOpacity>
+          </View>
+          
           {loadingQueue ? (
-            <ActivityIndicator />
+            <ActivityIndicator size="large" color="#2C6BED" style={styles.loader} />
           ) : customers.length === 0 ? (
-            <Text className="text-gray-500 text-center">No customers in queue</Text>
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No customers in queue</Text>
+            </View>
           ) : (
-            customers.map(c => (
+            customers.map((c, index) => (
               <View
                 key={c.id}
-                className="bg-white rounded-xl p-4 mb-3 shadow-sm border border-gray-100"
+                style={[
+                  styles.customerCard,
+                  index === 0 && { borderLeftWidth: 4, borderLeftColor: '#2C6BED' }
+                ]}
               >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="font-medium text-gray-900">{c.name}</Text>
-                    <Text className="text-gray-500 text-sm">Position: #{c.position}</Text>
+                <View style={styles.customerInfo}>
+                  <View style={styles.customerMain}>
+                    <Text style={styles.customerNameSmall}>{c.name}</Text>
+                    <Text style={styles.customerPosition}>Position #{c.position}</Text>
                   </View>
-                  <View className="flex-row items-center bg-teal-100 px-3 py-1 rounded-full">
-                    <Clock color="#4ECDC4" size={14} />
-                    <Text className="text-teal-700 font-medium ml-1">{c.waitTime} min</Text>
+                  
+                  <View style={styles.waitTime}>
+                    <Clock color="#2C6BED" size={14} />
+                    <Text style={styles.waitTimeTextSmall}>{c.waitTime} min</Text>
                   </View>
                 </View>
-
-                <View className="flex-row mt-3 gap-2">
+                
+                <View style={styles.customerActions}>
                   <TouchableOpacity
-                    className="bg-gray-100 p-2 rounded-lg flex-1 flex-row items-center justify-center"
+                    style={styles.actionButton}
                     onPress={() => addWaitTimeToCustomer(c.id, 5)}
                   >
                     <Plus color="#5A6B7C" size={16} />
-                    <Text className="text-gray-700 ml-1">+5 min</Text>
+                    <Text style={styles.actionButtonText}>+5 min</Text>
                   </TouchableOpacity>
-
+                  
                   <TouchableOpacity
-                    className="bg-blue-100 p-2 rounded-lg flex-1 flex-row items-center justify-center"
+                    style={[styles.actionButton, styles.notifyButton]}
                     onPress={() => notifyCustomer(c.id)}
                   >
                     <Bell color="#2C6BED" size={16} />
-                    <Text className="text-blue-700 ml-1">Notify</Text>
+                    <Text style={[styles.actionButtonText, styles.notifyButtonText]}>Notify</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -311,41 +417,361 @@ export default function BusinessView() {
         </View>
 
         {/* Tomorrow Appointments */}
-        <View className="mb-6">
-          <Text className="text-gray-900 text-lg font-bold mb-3">Tomorrow's Appointments</Text>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Tomorrow's Appointments</Text>
+            <TouchableOpacity>
+              <Calendar color="#2C6BED" size={20} />
+            </TouchableOpacity>
+          </View>
+          
           {loadingAppointments ? (
-            <ActivityIndicator />
+            <ActivityIndicator size="large" color="#2C6BED" style={styles.loader} />
           ) : appointments.length === 0 ? (
-            <Text className="text-gray-500">No appointments</Text>
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No appointments scheduled</Text>
+            </View>
           ) : (
             appointments.map(a => (
-              <View
-                key={a.id}
-                className="flex-row items-center bg-white rounded-xl p-4 mb-3 shadow-sm border border-gray-100"
-              >
-                <View className="flex-1">
-                  <Text className="font-medium text-gray-900">{a.name}</Text>
-                  <Text className="text-gray-500 text-sm">Position #{a.position}</Text>
+              <View key={a.id} style={styles.appointmentCard}>
+                <View style={styles.appointmentInfo}>
+                  <Text style={styles.appointmentName}>{a.name}</Text>
+                  <Text style={styles.appointmentTime}>{a.time || ''}</Text>
                 </View>
-                <Text className="text-teal-600 font-medium">{a.time || ''}</Text>
+                <ChevronRight color="#ccc" size={20} />
               </View>
             ))
           )}
         </View>
 
         {/* Quick Actions */}
-        <View className="flex-row gap-3 mb-6">
-          <TouchableOpacity className="flex-1 bg-white rounded-xl p-4 shadow-sm border border-gray-100 items-center">
-            <Calendar color="#4ECDC4" size={24} />
-            <Text className="mt-2 font-medium text-gray-900">Schedule</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity className="flex-1 bg-white rounded-xl p-4 shadow-sm border border-gray-100 items-center">
-            <TrendingUp color="#4ECDC4" size={24} />
-            <Text className="mt-2 font-medium text-gray-900">Reports</Text>
-          </TouchableOpacity>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={styles.quickAction}>
+              <View style={[styles.actionIcon, { backgroundColor: '#E3F2FD' }]}>
+                <Calendar color="#2C6BED" size={24} />
+              </View>
+              <Text style={styles.actionText}>Schedule</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickAction}>
+              <View style={[styles.actionIcon, { backgroundColor: '#E8F5E9' }]}>
+                <TrendingUp color="#4CAF50" size={24} />
+              </View>
+              <Text style={styles.actionText}>Reports</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickAction}>
+              <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
+                <Users color="#FF9800" size={24} />
+              </View>
+              <Text style={styles.actionText}>Staff</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.quickAction}>
+              <View style={[styles.actionIcon, { backgroundColor: '#FBE9E7' }]}>
+                <RotateCcw color="#FF5722" size={24} />
+              </View>
+              <Text style={styles.actionText}>Reset</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    backgroundColor: '#2C6BED',
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  appName: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  appTagline: {
+    color: '#cce0ff',
+    fontSize: 14,
+  },
+  userButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 10,
+    borderRadius: 50,
+  },
+  shopInfo: {
+    marginTop: 8,
+  },
+  greeting: {
+    color: 'white',
+    fontSize: 16,
+  },
+  shopName: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  shopAddress: {
+    color: '#cce0ff',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  errorText: {
+    color: '#ffcccc',
+    fontSize: 16,
+  },
+  scrollView: {
+    flex: 1,
+    padding: 16,
+  },
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2C6BED',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  nextCustomerCard: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 12,
+    padding: 16,
+  },
+  nextCustomerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  nextCustomerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  waitTimeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  waitTimeText: {
+    color: '#2C6BED',
+    fontWeight: '600',
+    marginLeft: 4,
+    fontSize: 14,
+  },
+  customerName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  customerPurpose: {
+    color: '#666',
+    marginBottom: 16,
+  },
+  callNextButton: {
+    flexDirection: 'row',
+    backgroundColor: '#2C6BED',
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callNextText: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  emptyQueue: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyQueueText: {
+    color: '#999',
+    marginTop: 8,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  loader: {
+    marginVertical: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyStateText: {
+    color: '#999',
+  },
+  customerCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  customerInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  customerMain: {
+    flex: 1,
+  },
+  customerNameSmall: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  customerPosition: {
+    fontSize: 14,
+    color: '#666',
+  },
+  waitTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  waitTimeTextSmall: {
+    color: '#2C6BED',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  customerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 4,
+    justifyContent: 'center',
+  },
+  actionButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#5A6B7C',
+  },
+  notifyButton: {
+    backgroundColor: '#E3F2FD',
+  },
+  notifyButtonText: {
+    color: '#2C6BED',
+  },
+  appointmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  appointmentInfo: {
+    flex: 1,
+  },
+  appointmentName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  appointmentTime: {
+    fontSize: 14,
+    color: '#2C6BED',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quickAction: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  actionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+});
