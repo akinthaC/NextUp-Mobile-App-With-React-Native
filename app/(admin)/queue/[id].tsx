@@ -1,12 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, ActivityIndicator, TouchableOpacity, FlatList,
-  Alert, StyleSheet, ScrollView, KeyboardAvoidingView, Platform
+  View,
+  Text,
+  ActivityIndicator,
+  TouchableOpacity,
+  FlatList,
+  Alert,
+  StyleSheet,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
+  TextInput,
 } from 'react-native';
 import { db, auth } from '../../../firebase';
 import {
-  collection, addDoc, getDocs, query,
-  orderBy, deleteDoc, doc
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  deleteDoc,
+  doc,
 } from 'firebase/firestore';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +38,7 @@ export default function QueueDetails() {
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // <-- Loader for buttons
   const [showTimePicker, setShowTimePicker] = useState(false);
 
   const fetchCustomers = async () => {
@@ -43,67 +59,79 @@ export default function QueueDetails() {
     }
   };
 
-  useEffect(() => { fetchCustomers(); }, [id]);
-
-const addCustomer = async () => {
-  if (!shopId || !id) return;
-  if (!name || !phone || !purpose || !startTime || !duration) {
-    return Alert.alert('Error', 'Please fill all fields');
-  }
-
-  const newStart = startTime.getTime();
-  const newEnd = newStart + duration * 60000;
-
-  // Overlap check
-  for (let c of customers) {
-    const existingStart = c.appointmentTimestamp;
-    const existingEnd = existingStart + (c.duration || 30) * 60000;
-    const overlap =
-      (newStart >= existingStart && newStart < existingEnd) ||
-      (newEnd > existingStart && newEnd <= existingEnd);
-    if (overlap) {
-      return Alert.alert(
-        'Time Conflict',
-        `Overlaps with ${c.customerName}'s appointment at ${formatTime(
-          new Date(existingStart)
-        )}`
-      );
-    }
-  }
-
-  try {
-    await addDoc(collection(db, `shops/${shopId}/queues/${id}/customers`), {
-      customerName: name,
-      phoneNumber: phone,
-      appointmentTimestamp: newStart,
-      duration,
-      purpose,
-      createdAt: new Date().getTime(),
-      date: new Date().toISOString().split('T')[0], // <-- today's date in YYYY-MM-DD
-      status: 'waiting', // <-- default status
-    });
-    setName('');
-    setPhone('');
-    setPurpose('');
-    setStartTime(null);
-    setDuration(null);
+  useEffect(() => {
     fetchCustomers();
-    Alert.alert('Success', 'Customer added');
-  } catch (err) {
-    console.error(err);
-    Alert.alert('Error', 'Failed to add customer');
-  }
-};
+  }, [id]);
 
+  const addCustomer = async () => {
+    if (!shopId || !id) return;
+    if (!name || !phone || !purpose || !startTime || !duration) {
+      return Alert.alert('Error', 'Please fill all fields');
+    }
+
+    const newStart = startTime.getTime();
+    const newEnd = newStart + duration * 60000;
+
+    // Overlap check
+    for (let c of customers) {
+      const existingStart = c.appointmentTimestamp;
+      const existingEnd = existingStart + (c.duration || 30) * 60000;
+      const overlap =
+        (newStart >= existingStart && newStart < existingEnd) ||
+        (newEnd > existingStart && newEnd <= existingEnd);
+      if (overlap) {
+        return Alert.alert(
+          'Time Conflict',
+          `Overlaps with ${c.customerName}'s appointment at ${formatTime(
+            new Date(existingStart)
+          )}`
+        );
+      }
+    }
+
+    try {
+      setIsProcessing(true);
+      await addDoc(
+        collection(db, `shops/${shopId}/queues/${id}/customers`),
+        {
+          customerName: name,
+          phoneNumber: phone,
+          appointmentTimestamp: newStart,
+          duration,
+          purpose,
+          createdAt: new Date().getTime(),
+          date: new Date().toISOString().split('T')[0],
+          status: 'waiting',
+        }
+      );
+      setName('');
+      setPhone('');
+      setPurpose('');
+      setStartTime(null);
+      setDuration(null);
+      fetchCustomers();
+      Alert.alert('Success', 'Customer added');
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Failed to add customer');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const deleteCustomer = async (cid: string) => {
     if (!shopId || !id) return;
     try {
-      await deleteDoc(doc(db, `shops/${shopId}/queues/${id}/customers/${cid}`));
+      setIsProcessing(true);
+      await deleteDoc(
+        doc(db, `shops/${shopId}/queues/${id}/customers/${cid}`)
+      );
       fetchCustomers();
     } catch (err) {
       console.error(err);
       Alert.alert('Error', 'Failed to delete appointment');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -115,12 +143,21 @@ const addCustomer = async () => {
     return `${hh}:${m} ${suffix}`;
   };
 
+  const handleCall = (number: string) => {
+    if (!number) return Alert.alert('Error', 'No phone number available');
+    setIsProcessing(true);
+    Linking.openURL(`tel:${number}`).finally(() => setIsProcessing(false));
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingTop: 20 }}
+      >
         {/* --- Form --- */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Add New Appointment</Text>
@@ -140,7 +177,8 @@ const addCustomer = async () => {
           />
           <TouchableOpacity
             style={styles.timeButton}
-            onPress={() => setShowTimePicker(true)}>
+            onPress={() => setShowTimePicker(true)}
+          >
             <Ionicons name="time-outline" size={20} color="#666" />
             <Text style={styles.timeText}>
               {startTime ? formatTime(startTime) : 'Select Start Time'}
@@ -172,9 +210,19 @@ const addCustomer = async () => {
             onChangeText={setPurpose}
           />
 
-          <TouchableOpacity style={styles.addButton} onPress={addCustomer}>
-            <Ionicons name="add-circle" size={22} color="white" />
-            <Text style={styles.addButtonText}>Add Customer</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={addCustomer}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <>
+                <Ionicons name="add-circle" size={22} color="white" />
+                <Text style={styles.addButtonText}>Add Customer</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -203,23 +251,38 @@ const addCustomer = async () => {
                       <Text style={styles.customerInfo}>{item.phoneNumber}</Text>
                       <Text style={styles.customerInfo}>{item.purpose}</Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() =>
-                        Alert.alert(
-                          'Delete',
-                          'Remove this appointment?',
-                          [
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      {/* Call Button */}
+                      <TouchableOpacity
+                        onPress={() => handleCall(item.phoneNumber)}
+                        style={styles.callButton}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing ? (
+                          <ActivityIndicator color="#4a6cff" />
+                        ) : (
+                          <Ionicons name="call-outline" size={22} color="#4a6cff" />
+                        )}
+                      </TouchableOpacity>
+
+                      {/* Delete Button */}
+                      <TouchableOpacity
+                        onPress={() =>
+                          Alert.alert('Delete', 'Remove this appointment?', [
                             { text: 'Cancel', style: 'cancel' },
                             {
                               text: 'Delete',
                               style: 'destructive',
                               onPress: () => deleteCustomer(item.id),
                             },
-                          ]
-                        )
-                      }>
-                      <Ionicons name="trash" size={22} color="red" />
-                    </TouchableOpacity>
+                          ])
+                        }
+                        disabled={isProcessing}
+                      >
+                        <Ionicons name="trash" size={22} color="red" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 );
               }}
@@ -235,7 +298,6 @@ const addCustomer = async () => {
 }
 
 /* ---------- Small helper component ---------- */
-import { TextInput } from 'react-native';
 const TextInputField = ({ icon, ...props }) => (
   <View style={styles.inputContainer}>
     <Ionicons name={icon} size={20} color="#666" style={{ marginRight: 10 }} />
@@ -298,4 +360,5 @@ const styles = StyleSheet.create({
   customerName: { fontSize: 16, fontWeight: '600' },
   customerInfo: { color: '#555', fontSize: 14 },
   emptyText: { textAlign: 'center', color: '#666', marginTop: 20 },
+  callButton: { marginRight: 15 },
 });

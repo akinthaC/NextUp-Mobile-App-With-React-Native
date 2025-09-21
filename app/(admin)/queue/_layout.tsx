@@ -5,7 +5,7 @@ import { Stack } from 'expo-router';
 export default function QueueLayout({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.container}>
-      <Stack screenOptions={{ headerShown: true }} />
+      <Stack screenOptions={{ headerShown: false }} />
       {children}
     </View>
   );

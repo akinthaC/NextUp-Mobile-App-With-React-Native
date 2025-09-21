@@ -395,7 +395,7 @@ export default function QueuePage() {
     <View style={styles.container}>
       <ScrollView 
         style={styles.mainScrollView}
-        contentContainerStyle={styles.scrollContent}
+         contentContainerStyle={[styles.scrollContent, { paddingTop:40 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Date selector for creating queue */}

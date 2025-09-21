@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Platform,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import {
   Users,
@@ -19,7 +20,6 @@ import {
   Bell,
   Calendar,
   TrendingUp,
-  X,
   User,
   ChevronRight,
   MoreVertical,
@@ -36,6 +36,7 @@ export default function BusinessView() {
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);   // ← added state
 
   const shopId = auth.currentUser?.uid;
 
@@ -49,23 +50,24 @@ export default function BusinessView() {
   }, []);
 
   // ---------- Load Shop ----------
-  useEffect(() => {
-    const fetchShop = async () => {
-      setLoadingShop(true);
-      try {
-        const qs = await getDocs(collection(db, 'shops'));
-        const shopDoc = qs.docs.find(doc => doc.data().ownerId === shopId);
-        if (shopDoc) setShop({ id: shopDoc.id, ...shopDoc.data() });
-        else setShop(null);
-      } catch (err) {
-        console.error(err);
-        Alert.alert('Error', 'Failed to fetch shop details');
-      } finally {
-        setLoadingShop(false);
-      }
-    };
-    fetchShop();
+  const fetchShop = useCallback(async () => {
+    setLoadingShop(true);
+    try {
+      const qs = await getDocs(collection(db, 'shops'));
+      const shopDoc = qs.docs.find(doc => doc.data().ownerId === shopId);
+      if (shopDoc) setShop({ id: shopDoc.id, ...shopDoc.data() });
+      else setShop(null);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Failed to fetch shop details');
+    } finally {
+      setLoadingShop(false);
+    }
   }, [shopId]);
+
+  useEffect(() => {
+    fetchShop();
+  }, [fetchShop]);
 
   // ---------- Merge & Calculate Positions ----------
   const mergeAndCalculateQueue = (customerList: any[]) => {
@@ -89,137 +91,139 @@ export default function BusinessView() {
   };
 
   // ---------- Fetch Today's Queue ----------
-  useEffect(() => {
-    let interval: any;
+  const fetchWaitingCustomers = useCallback(async () => {
+    if (!shop) return;
+    setLoadingQueue(true);
 
-    const fetchWaitingCustomers = async () => {
-      if (!shop) return;
-      setLoadingQueue(true);
+    try {
+      const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
+      let allCustomers: any[] = [];
 
-      try {
-        const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
-        let allCustomers: any[] = [];
+      for (const queueDoc of queuesSnap.docs) {
+        const queueData = queueDoc.data();
+        if (!queueData.date) continue;
 
-        for (const queueDoc of queuesSnap.docs) {
-          const queueData = queueDoc.data();
-          if (!queueData.date) continue;
+        const queueDate = queueData.date.toDate ? queueData.date.toDate() : queueData.date;
+        const today = new Date();
+        if (queueDate.toDateString() !== today.toDateString()) continue;
 
-          const queueDate = queueData.date.toDate ? queueData.date.toDate() : queueData.date;
-          const today = new Date();
-          if (queueDate.toDateString() !== today.toDateString()) continue;
+        const customersSnap = await getDocs(
+          collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
+        );
 
-          const customersSnap = await getDocs(
-            collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
-          );
-
-          const customersData = customersSnap.docs
-            .map(c => {
-              const cData = c.data();
-              if (cData.status && cData.status !== "waiting") return null;
-
-              const apptTime =
-                typeof cData.appointmentTimestamp === 'number'
-                  ? cData.appointmentTimestamp
-                  : cData.appointmentTimestamp?.toMillis?.() ??
-                    cData.appointmentTimestamp?.toDate?.().getTime() ??
-                    null;
-
-              return {
-                id: c.id,
-                queueId: queueDoc.id,
-                name: cData.customerName,
-                createdAt: cData.createdAt?.toDate ? cData.createdAt.toDate() : new Date(),
-                appointmentTimestamp: apptTime,
-                waitTime: cData.waitTime || 0,
-                ...cData,
-              };
-            })
-            .filter(Boolean);
-
-          allCustomers = allCustomers.concat(customersData);
-        }
-
-        const sortedCustomers = allCustomers
-          .filter(c => c.appointmentTimestamp)
-          .sort((a, b) => a.appointmentTimestamp - b.appointmentTimestamp);
-
-        setCustomers(mergeAndCalculateQueue(sortedCustomers));
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoadingQueue(false);
-      }
-    };
-
-    // Initial fetch
-    fetchWaitingCustomers();
-
-    // Set interval to refresh every 10 seconds
-    interval = setInterval(fetchWaitingCustomers, 10000);
-
-    // Cleanup on unmount
-    return () => clearInterval(interval);
-  }, [shop]);
-
-
-  // ---------- Fetch Tomorrow Appointments ----------
-  useEffect(() => {
-    const fetchTomorrowAppointments = async () => {
-      if (!shop) return;
-      setLoadingAppointments(true);
-
-      try {
-        const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
-        let allAppointments: any[] = [];
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        for (const queueDoc of queuesSnap.docs) {
-          const queueData = queueDoc.data();
-          if (!queueData.date) continue;
-
-          const queueDate = queueData.date.toDate ? queueData.date.toDate() : queueData.date;
-          if (queueDate.toDateString() !== tomorrow.toDateString()) continue;
-
-          const customersSnap = await getDocs(
-            collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
-          );
-
-          const customersData = customersSnap.docs.map(c => {
+        const customersData = customersSnap.docs
+          .map(c => {
             const cData = c.data();
-            const appointmentDate = cData.appointmentTimestamp?.toDate
-              ? cData.appointmentTimestamp.toDate()
-              : cData.appointmentTimestamp instanceof Date
-              ? cData.appointmentTimestamp
-              : null;
+            if (cData.status && cData.status !== "waiting") return null;
+
+            const apptTime =
+              typeof cData.appointmentTimestamp === 'number'
+                ? cData.appointmentTimestamp
+                : cData.appointmentTimestamp?.toMillis?.() ??
+                  cData.appointmentTimestamp?.toDate?.().getTime() ?? null;
 
             return {
               id: c.id,
               queueId: queueDoc.id,
               name: cData.customerName,
-              appointmentTimestamp: appointmentDate,
-              position: 0,
-              time: appointmentDate
-                ? appointmentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : '',
+              createdAt: cData.createdAt?.toDate ? cData.createdAt.toDate() : new Date(),
+              appointmentTimestamp: apptTime,
+              waitTime: cData.waitTime || 0,
               ...cData,
             };
-          });
+          })
+          .filter(Boolean) as any[];
 
-          allAppointments = allAppointments.concat(customersData);
-        }
-
-        setAppointments(mergeAndCalculateQueue(allAppointments));
-      } catch (err) {
-        console.error(err);
-        Alert.alert('Error', 'Failed to load tomorrow appointments');
-      } finally {
-        setLoadingAppointments(false);
+        allCustomers = allCustomers.concat(customersData);
       }
-    };
 
+      const sortedCustomers = allCustomers
+        .filter(c => c.appointmentTimestamp)
+        .sort((a, b) => a.appointmentTimestamp - b.appointmentTimestamp);
+
+      setCustomers(mergeAndCalculateQueue(sortedCustomers));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingQueue(false);
+    }
+  }, [shop, shopId]);
+
+  useEffect(() => {
+    fetchWaitingCustomers();
+    const interval = setInterval(fetchWaitingCustomers, 10000);
+    return () => clearInterval(interval);
+  }, [fetchWaitingCustomers]);
+
+  // ---------- Fetch Tomorrow Appointments ----------
+  const fetchTomorrowAppointments = useCallback(async () => {
+    if (!shop) return;
+    setLoadingAppointments(true);
+
+    try {
+      const queuesSnap = await getDocs(collection(db, `shops/${shopId}/queues`));
+      let allAppointments: any[] = [];
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      for (const queueDoc of queuesSnap.docs) {
+        const queueData = queueDoc.data();
+        if (!queueData.date) continue;
+
+        const queueDate = queueData.date.toDate ? queueData.date.toDate() : queueData.date;
+        if (queueDate.toDateString() !== tomorrow.toDateString()) continue;
+
+        const customersSnap = await getDocs(
+          collection(db, `shops/${shopId}/queues/${queueDoc.id}/customers`)
+        );
+
+        const customersData = customersSnap.docs.map(c => {
+          const cData = c.data();
+          const appointmentDate = cData.appointmentTimestamp?.toDate
+            ? cData.appointmentTimestamp.toDate()
+            : cData.appointmentTimestamp instanceof Date
+            ? cData.appointmentTimestamp
+            : null;
+
+          return {
+            id: c.id,
+            queueId: queueDoc.id,
+            name: cData.customerName,
+            appointmentTimestamp: appointmentDate,
+            position: 0,
+            time: appointmentDate
+              ? appointmentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '',
+            ...cData,
+          };
+        });
+
+        allAppointments = allAppointments.concat(customersData);
+      }
+
+      setAppointments(mergeAndCalculateQueue(allAppointments));
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Failed to load tomorrow appointments');
+    } finally {
+      setLoadingAppointments(false);
+    }
+  }, [shop, shopId]);
+
+  useEffect(() => {
     fetchTomorrowAppointments();
-  }, [shop]);
+  }, [fetchTomorrowAppointments]);
+
+  // ---------- Pull-to-Refresh ----------
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([
+      fetchShop(),
+      fetchWaitingCustomers(),
+      fetchTomorrowAppointments(),
+    ]);
+    setRefreshing(false);
+  }, [fetchShop, fetchWaitingCustomers, fetchTomorrowAppointments]);
 
   // ---------- Controls ----------
   const toggleQueue = () => setQueueActive(!queueActive);
@@ -232,7 +236,6 @@ export default function BusinessView() {
 
     try {
       const next = customers[0];
-
       if (!next.queueId || !next.id) {
         Alert.alert('Error', 'Invalid customer data');
         return;
@@ -247,12 +250,8 @@ export default function BusinessView() {
         return;
       }
 
-      // Update Firestore
       await updateDoc(customerRef, { status: 'served', servedAt: Date.now() });
-
-      // Remove from local list and recalc positions
       setCustomers(prev => mergeAndCalculateQueue(prev.filter(c => c.id !== next.id)));
-
       Alert.alert('Next Customer Called', `Customer ${next.name} is being served.`);
     } catch (err) {
       console.error(err);
@@ -271,7 +270,6 @@ export default function BusinessView() {
     const c = customers.find(x => x.id === id);
     if (c) Alert.alert('Notification Sent', `Customer ${c.name} notified`);
   };
-
   // ---------- Render ----------
   return (
     <View style={styles.container}>
@@ -301,8 +299,13 @@ export default function BusinessView() {
           <Text style={styles.errorText}>No shop found</Text>
         )}
       </View>
-
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+<ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Queue Overview */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Queue Overview</Text>
@@ -424,7 +427,7 @@ export default function BusinessView() {
               <Calendar color="#2C6BED" size={20} />
             </TouchableOpacity>
           </View>
-          
+
           {loadingAppointments ? (
             <ActivityIndicator size="large" color="#2C6BED" style={styles.loader} />
           ) : appointments.length === 0 ? (
@@ -432,52 +435,42 @@ export default function BusinessView() {
               <Text style={styles.emptyStateText}>No appointments scheduled</Text>
             </View>
           ) : (
-            appointments.map(a => (
-              <View key={a.id} style={styles.appointmentCard}>
-                <View style={styles.appointmentInfo}>
-                  <Text style={styles.appointmentName}>{a.name}</Text>
-                  <Text style={styles.appointmentTime}>{a.time || ''}</Text>
+            appointments.map(a => {
+              const scheduledTime = new Date(a.appointmentTimestamp);
+
+              // Calculate checkout time
+              const checkoutTime = new Date(a.appointmentTimestamp + a.duration * 60000);
+
+              // Function to format time in 12-hour AM/PM format
+              const formatTimeAMPM = (date: Date) => {
+                let hours = date.getHours();
+                const minutes = date.getMinutes();
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12;
+                hours = hours ? hours : 12; // hour '0' should be '12'
+                const minutesStr = minutes.toString().padStart(2, '0');
+                return `${hours}.${minutesStr} ${ampm}`;
+              };
+
+              return (
+                <View key={a.id} style={styles.appointmentCard}>
+                  <View style={styles.appointmentInfo}>
+                    <Text style={styles.appointmentName}>{a.customerName}</Text>
+                    <Text style={styles.appointmentPurpose}>{a.purpose}</Text>
+                    <Text style={styles.appointmentTimes}>
+                      Scheduled: {formatTimeAMPM(scheduledTime)} | Checkout: {formatTimeAMPM(checkoutTime)}
+                    </Text>
+                  </View>
+                  <ChevronRight color="#ccc" size={20} />
                 </View>
-                <ChevronRight color="#ccc" size={20} />
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
+
         {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={[styles.actionIcon, { backgroundColor: '#E3F2FD' }]}>
-                <Calendar color="#2C6BED" size={24} />
-              </View>
-              <Text style={styles.actionText}>Schedule</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={[styles.actionIcon, { backgroundColor: '#E8F5E9' }]}>
-                <TrendingUp color="#4CAF50" size={24} />
-              </View>
-              <Text style={styles.actionText}>Reports</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
-                <Users color="#FF9800" size={24} />
-              </View>
-              <Text style={styles.actionText}>Staff</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.quickAction}>
-              <View style={[styles.actionIcon, { backgroundColor: '#FBE9E7' }]}>
-                <RotateCcw color="#FF5722" size={24} />
-              </View>
-              <Text style={styles.actionText}>Reset</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        
       </ScrollView>
     </View>
   );

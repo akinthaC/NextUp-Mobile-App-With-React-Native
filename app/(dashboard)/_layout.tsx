@@ -1,31 +1,89 @@
 import React from 'react';
 import { Tabs } from 'expo-router/tabs';
-import Entypo from '@expo/vector-icons/Entypo';
-
-type EntypoIconName = "home" | "clipboard" | "user" | "cog";
-
-const tabs: { label: string; name: string; icon: EntypoIconName }[] = [
-  { label: "Home", name: "home", icon: "home" },
-  { label: "Tasks", name: "task", icon: "clipboard" },
-  { label: "Profile", name: "profile", icon: "user" },
-  { label: "Settings", name: "setting", icon: "cog" }
-];
+import { View, Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 const DashboardLayout = () => {
   return (
-    <Tabs>
-      {tabs.map((tab) => (
-        <Tabs.Screen
-          key={tab.name} // ✅ Unique key here
-          name={tab.name}
-          options={{
-            title: tab.label,
-            tabBarIcon: ({ color, size }) => (
-              <Entypo name={tab.icon} size={size} color={color} />
-            ),
-          }}
-        />
-      ))}
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F3F4F6',
+          height: 80,
+          paddingBottom: 16,
+          paddingTop: 8,
+        },
+        tabBarActiveTintColor: '#6366F1',
+        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '500',
+        },
+      }}
+    >
+      <Tabs.Screen
+        name="home"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color, size, focused }) => (
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+              <Ionicons 
+                name={focused ? 'home' : 'home-outline'} 
+                size={size} 
+                color={color} 
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="NearbyShops"
+        options={{
+          title: 'Nearby',
+          tabBarIcon: ({ color, size, focused }) => (
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+              <Ionicons 
+                name={focused ? 'location' : 'location-outline'} 
+                size={size} 
+                color={color} 
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, size, focused }) => (
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+              <Ionicons 
+                name={focused ? 'person' : 'person-outline'} 
+                size={size} 
+                color={color} 
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size, focused }) => (
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+              <Ionicons 
+                name={focused ? 'settings' : 'settings-outline'} 
+                size={size} 
+                color={color} 
+              />
+            </View>
+          ),
+        }}
+      />
     </Tabs>
   );
 };
