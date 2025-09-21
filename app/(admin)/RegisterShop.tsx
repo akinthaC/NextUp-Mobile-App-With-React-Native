@@ -617,7 +617,6 @@
 //     fontWeight: "bold" 
 //   },
 // });
-
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -633,7 +632,7 @@ import {
   Easing,
 } from "react-native";
 import { db, auth } from "../../firebase";
-import { collection, addDoc, query, where, getDocs } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -752,6 +751,7 @@ interface LocationType {
 export default function RegisterShop() {
   const navigation = useNavigation();
 
+  const [shopId, setShopId] = useState<string | null>(null); // <--- added to track Firestore doc ID
   const [shopName, setShopName] = useState("");
   const [shopAddress, setShopAddress] = useState("");
   const [contactNumber, setContactNumber] = useState("");
@@ -792,6 +792,42 @@ export default function RegisterShop() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permission denied", "Allow location access to use this feature");
+      }
+
+      // --- Load existing shop data ---
+      if (auth.currentUser) {
+        try {
+          const q = query(
+            collection(db, "shops"),
+            where("ownerId", "==", auth.currentUser.uid)
+          );
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const docSnap = snapshot.docs[0];
+            const data = docSnap.data();
+            setShopId(docSnap.id); // store doc ID
+
+            setShopName(data.name || "");
+            setShopAddress(data.address || "");
+            setContactNumber(data.contact || "");
+            setCategory(data.category || "");
+            setLocation(data.location || { latitude: 6.9271, longitude: 79.8612 });
+
+            // Convert businessHours from strings to Date
+            const loadedBusinessHours: BusinessHoursType = {};
+            for (let day in data.businessHours) {
+              const startParts = data.businessHours[day].start.split(":").map(Number);
+              const endParts = data.businessHours[day].end.split(":").map(Number);
+              loadedBusinessHours[day] = {
+                start: new Date(new Date().setHours(startParts[0], startParts[1], 0, 0)),
+                end: new Date(new Date().setHours(endParts[0], endParts[1], 0, 0)),
+              };
+            }
+            setBusinessHours(loadedBusinessHours);
+          }
+        } catch (error) {
+          console.error("Error loading shop:", error);
+        }
       }
     })();
   }, []);
@@ -841,7 +877,7 @@ export default function RegisterShop() {
     return letters + digits;
   }
 
-  const handleRegisterShop = async () => {
+  const handleSaveShop = async () => {
     if (!shopName || !shopAddress || !contactNumber || !category) {
       Alert.alert("Error", "Please fill all fields and select a category");
       return;
@@ -854,19 +890,6 @@ export default function RegisterShop() {
     setIsSubmitting(true);
 
     try {
-      const q = query(
-        collection(db, "shops"),
-        where("ownerId", "==", auth.currentUser.uid)
-      );
-      const existing = await getDocs(q);
-      if (!existing.empty) {
-        setIsSubmitting(false);
-        Alert.alert("Already Registered", "You have already registered a shop.");
-        return;
-      }
-
-      const shopId = generateShopId(shopName);
-
       const businessHoursForFirestore = Object.keys(businessHours).reduce(
         (acc, day) => {
           acc[day] = {
@@ -879,24 +902,30 @@ export default function RegisterShop() {
       );
 
       const shopData = {
-        shopId,
         name: shopName,
         address: shopAddress,
         contact: contactNumber,
         category,
-        ownerId: auth.currentUser.uid,
         location,
         businessHours: businessHoursForFirestore,
-        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      const docRef = await addDoc(collection(db, "shops"), shopData);
-      console.log("Shop added with ID:", docRef.id);
+      if (shopId) {
+        // Update existing shop
+        const shopDocRef = doc(db, "shops", shopId);
+        await updateDoc(shopDocRef, shopData);
+        Alert.alert("Success", "Shop updated successfully!");
+      } else {
+        // Create new shop
+        const newShopId = generateShopId(shopName);
+        await addDoc(collection(db, "shops"), { ...shopData, shopId: newShopId, ownerId: auth.currentUser.uid, createdAt: new Date() });
+        Alert.alert("Success", "Shop registered successfully!");
+      }
 
-      Alert.alert("Success", "Shop registered successfully!");
       navigation.navigate("home" as never);
     } catch (error: any) {
-      console.error("Error registering shop:", error);
+      console.error("Error saving shop:", error);
       Alert.alert("Error", error.message);
     } finally {
       setIsSubmitting(false);
@@ -1052,7 +1081,7 @@ export default function RegisterShop() {
 
         <TouchableOpacity
           style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-          onPress={handleRegisterShop}
+          onPress={handleSaveShop}
           disabled={isSubmitting}
           activeOpacity={0.8}
         >
@@ -1065,7 +1094,9 @@ export default function RegisterShop() {
             {isSubmitting ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Text style={styles.submitButtonText}>Register Shop</Text>
+              <Text style={styles.submitButtonText}>
+                {shopId ? "Update Shop" : "Register Shop"}
+              </Text>
             )}
           </LinearGradient>
         </TouchableOpacity>
