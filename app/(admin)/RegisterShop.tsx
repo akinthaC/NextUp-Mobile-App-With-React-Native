@@ -937,6 +937,7 @@ export default function RegisterShop() {
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator={false}
+      
     >
       <LinearGradient colors={["#6a11cb", "#2575fc"]} style={styles.header}>
         <Text style={styles.title}>Register Your Shop</Text>
@@ -1107,8 +1108,8 @@ export default function RegisterShop() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8f9fa" },
-  contentContainer: { paddingBottom: 40 },
-  header: { paddingVertical: 30, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  contentContainer: { paddingBottom: 40 ,paddingTop: 20},
+  header: { paddingVertical: 40, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   title: { fontSize: 28, fontWeight: "bold", color: "white", marginBottom: 8 },
   subtitle: { fontSize: 16, color: "rgba(255, 255, 255, 0.8)" },
   formContainer: { flex: 1, padding: 20 },

@@ -232,6 +232,7 @@ import {
   Dimensions,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+
 import { db, auth } from '../../../firebase';
 import {
   collection,
@@ -244,6 +245,8 @@ import {
 } from 'firebase/firestore';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+
 
 const { height } = Dimensions.get('window');
 
@@ -393,11 +396,16 @@ export default function QueuePage() {
 
   return (
     <View style={styles.container}>
+      <LinearGradient colors={['#6a11cb', '#2575fc']} style={styles.header}>
+                <Text style={styles.headerTitle}>Queue</Text>
+                <Text style={styles.headerSubtitle}>Manage your Queues</Text>
+        </LinearGradient>
       <ScrollView 
         style={styles.mainScrollView}
          contentContainerStyle={[styles.scrollContent, { paddingTop:40 }]}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={false} 
       >
+
         {/* Date selector for creating queue */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Create New Queue</Text>
@@ -600,12 +608,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+
+  header: { paddingVertical: 40, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, },
+
+  headerTitle: { fontSize: 32, fontWeight: 'bold', color: 'white', marginBottom: 8 },
+
+  headerSubtitle: { fontSize: 16, color: 'rgba(255, 255, 255, 0.9)' },
   mainScrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 30, // Extra padding at the bottom
+    paddingBottom: 5, // Extra padding at the bottom
   },
   card: {
     backgroundColor: 'white',

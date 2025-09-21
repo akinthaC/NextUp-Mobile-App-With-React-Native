@@ -380,10 +380,10 @@ const Setting = () => {
 
 // Keep your existing styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#fff',paddingTop: 20 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   loadingText: { marginTop: 15, fontSize: 16, color: '#666' },
-  header: { paddingVertical: 40, paddingHorizontal: 24, alignItems: 'flex-start' },
+  header: { paddingVertical: 30, paddingHorizontal: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
   headerTitle: { fontSize: 32, fontWeight: 'bold', color: 'white', marginBottom: 8 },
   headerSubtitle: { fontSize: 16, color: 'rgba(255, 255, 255, 0.9)' },
   settingsContainer: { marginTop: 24, paddingHorizontal: 16 },

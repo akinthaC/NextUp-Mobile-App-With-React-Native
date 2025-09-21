@@ -158,6 +158,7 @@ export default function QueueDetails() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: 20 }}
       >
+        
         {/* --- Form --- */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Add New Appointment</Text>
