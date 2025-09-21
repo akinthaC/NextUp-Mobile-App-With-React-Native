@@ -39,7 +39,7 @@ const RegisterScreen = () => {
 
     try {
       await Register(email, password, username); // always customer role
-      router.replace("/");
+      router.replace("/login");
     } catch (err: any) {
       setError(err?.message || "Registration failed.");
     } finally {
