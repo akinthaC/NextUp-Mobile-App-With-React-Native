@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
   primaryButton: { flex: 1, backgroundColor: '#4f46e5', padding: 16, borderRadius: 12, alignItems: 'center', marginLeft: 8 },
   primaryButtonText: { color: 'white', fontWeight: '600' },
   secondaryButton: { flex: 1, backgroundColor: '#e0e7ff', padding: 16, borderRadius: 12, alignItems: 'center', marginRight: 8 },
-  secondaryButtonText: { color: '#4f46e5', fontWeight: '600' },
+  secondaryButtonText: {  },
 });
 
 export default Setting;
