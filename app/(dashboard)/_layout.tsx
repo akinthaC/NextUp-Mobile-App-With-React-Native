@@ -44,7 +44,7 @@ const DashboardLayout = () => {
         options={{
           title: 'Nearby',
           tabBarIcon: ({ color, size, focused }) => (
-            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-1.1' : ''}`}>
               <Ionicons 
                 name={focused ? 'location' : 'location-outline'} 
                 size={size} 
@@ -59,7 +59,7 @@ const DashboardLayout = () => {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size, focused }) => (
-            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
+            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-1.4' : ''}`}>
               <Ionicons 
                 name={focused ? 'person' : 'person-outline'} 
                 size={size} 
@@ -69,21 +69,7 @@ const DashboardLayout = () => {
           ),
         }}
       />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size, focused }) => (
-            <View className={`items-center justify-center ${focused ? 'bg-indigo-100 rounded-full p-2' : ''}`}>
-              <Ionicons 
-                name={focused ? 'settings' : 'settings-outline'} 
-                size={size} 
-                color={color} 
-              />
-            </View>
-          ),
-        }}
-      />
+      
     </Tabs>
   );
 };
