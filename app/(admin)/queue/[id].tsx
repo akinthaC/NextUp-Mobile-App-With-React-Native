@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     paddingVertical: 12,
   },
-  customerName: { },
+  customerName: { fontSize: 16, fontWeight: '600' },
   customerInfo: { color: '#555', fontSize: 14 },
   emptyText: { textAlign: 'center', color: '#666', marginTop: 20 },
   callButton: { marginRight: 15 },
