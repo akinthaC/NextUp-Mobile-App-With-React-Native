@@ -1136,5 +1136,5 @@ const styles = StyleSheet.create({
   submitButton: { marginTop: 20, borderRadius: 12, overflow: "hidden" },
   submitButtonDisabled: { opacity: 0.7 },
   gradientButton: { paddingVertical: 16, justifyContent: "center", alignItems: "center", borderRadius: 12 },
-  submitButtonText: {}
+  submitButtonText: { color: "white", fontSize: 16, fontWeight: "bold" },
 });
