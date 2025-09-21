@@ -742,6 +742,15 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 4,
   },
+  appointmentPurpose: {
+   
+  },
+
+   appointmentTimes: {
+    fontSize: 14,
+    color: '#2C6BED',
+  },
+
   appointmentTime: {
     fontSize: 14,
     color: '#2C6BED',
