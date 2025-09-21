@@ -123,5 +123,5 @@ const styles = StyleSheet.create({
   qrCard: { backgroundColor: 'white', borderRadius: 16, padding: 20, alignItems: 'center' },
   qrTitle: { fontSize: 18, fontWeight: '600', marginBottom: 15 },
   downloadButton: { flexDirection: 'row', backgroundColor: '#4a6cff', padding: 12, borderRadius: 12, marginTop: 20, alignItems: 'center' },
-  downloadText: {  },
+  downloadText: { color: 'white', fontWeight: '600', marginLeft: 10, fontSize: 16 },
 });
