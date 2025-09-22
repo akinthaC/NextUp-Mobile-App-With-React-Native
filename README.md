@@ -1,3 +1,45 @@
+# NextUp
+
+NextUp is a mobile app that replaces physical waiting lines with a smart, real-time virtual queue system.
+
+---
+
+## 📱 Overview
+NextUp allows customers to:
+- Join a queue by scanning a shop’s QR code or entering a unique shop ID.
+- View their live queue position and estimated wait time.
+- Receive push notifications when their turn is approaching.
+
+Businesses can:
+- Manage queues digitally.
+- Track peak hours and customer flow.
+- Reduce crowding and improve service efficiency.
+
+---
+
+## 🚀 Features
+- User authentication (Firebase Auth)
+- Real-time database updates (Firestore)
+- QR code generation & scanning
+- Push notifications
+- Modern, responsive UI built with **React Native + Expo**
+
+---
+
+## 🛠️ Tech Stack
+- **Frontend:** React Native (Expo)
+- **Backend / DB:** Firebase Firestore
+- **Authentication:** Firebase Auth
+- **Notifications:** Expo Notifications
+- **Version Control:** Git & GitHub
+
+---
+
+## 📂 Project Structure
+
+
+
+
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
