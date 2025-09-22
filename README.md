@@ -45,8 +45,7 @@ NextUp/
 ├── assets/
 └── App.js
 
-yaml
-Copy code
+
 
 ---
 
@@ -55,6 +54,26 @@ Copy code
    ```bash
    git clone https://github.com/your-username/nextup.git
    cd nextup
+
+
+   🤝 Contributing
+
+Pull requests are welcome!
+
+ 1.Fork the repo
+
+ 2.Create a feature branch
+
+ 3.Commit changes
+
+ 4.Open a PR
+
+ 
+### How to Use
+1. Save the content above as `README.md` in the root of your Git repo.  
+2. Replace `your-username` and Firebase details with your actual project information.  
+3. Add screenshots, badges, or demo links later as the app develops.
+
 
 
 # Welcome to your Expo app 👋
