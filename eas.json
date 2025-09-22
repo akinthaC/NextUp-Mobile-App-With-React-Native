@@ -12,10 +12,10 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true,
-      "env": {
-        "ANDROID_SDK_ROOT": "/opt/android-sdk"
-      }
+      "android": {
+        "buildType": "apk"
+      },
+      "autoIncrement": true
     }
   },
   "submit": {
