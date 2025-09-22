@@ -92,7 +92,11 @@ export default function Profile() {
         <View style={styles.qrCard}>
           <Text style={styles.qrTitle}>Shop QR Code</Text>
           <QRCode
-            value={JSON.stringify({ id: shop.id, name: shop.name })} // ✅ encode both shop id and name
+            value={JSON.stringify({
+            id: shop.id,
+            name: shop.name,
+            ownerId: auth.currentUser?.uid, // ➜ add ownerId here
+          })} // ✅ encode both shop id and name
             size={220}
             getRef={qrRef}
             backgroundColor="white"

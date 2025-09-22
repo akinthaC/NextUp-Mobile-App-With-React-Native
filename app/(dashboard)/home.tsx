@@ -882,9 +882,13 @@ export default function CustomerView() {
       const shopsSnap = await getDocs(collection(db, 'shops'));
       const queues: QueueItem[] = [];
 
+      console.log("shopsnap",shopsSnap)
+
       for (const shopDoc of shopsSnap.docs) {
         const ownerId = shopDoc.data().ownerId;
+        console.log("ownerId",ownerId)
         setShopId(ownerId);
+        console.log("shopId",shopId1)
 
         const queuesSnap = await getDocs(
           query(collection(db, `shops/${ownerId}/queues`), orderBy('date', 'asc'))
@@ -1002,8 +1006,12 @@ export default function CustomerView() {
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     setScanning(false);
     try {
-      const parsed = JSON.parse(data);
+      const parsed = JSON.parse(data); 
+      console.log("parrrrr",parsed.ownerId)
+
       setShopId(parsed.ownerId);
+      console.log("owner",parsed.ownerId)
+       console.log(shopId1)
       setShopForModal({ shopId: parsed.id, shopName: parsed.name });
       setCustomerModal(true);
     } catch {
@@ -1028,8 +1036,11 @@ export default function CustomerView() {
       // Assume first match is the correct shop
       const shopDoc = snap.docs[0];
       const shopData = shopDoc.data();
+      console.log("shopdata",shopData)
+      console.log("shopId333",shopData.ownerId)
 
       setShopId(shopData.ownerId);
+      console.log("shopId333",shopData.ownerId)
       // Save info for the modal and open the customer form
       setShopForModal({ shopId: shopDoc.id, shopName: shopData.name || '' });
       setManualModal(false);
@@ -1051,6 +1062,8 @@ const confirmJoinQueue = async () => {
   if (currentQueues.length >= 4) {
     return Alert.alert('Limit reached', 'You can join up to 4 queues at the same time');
   }
+
+  console.log("lastShop",shopId1)
 
   try {
     const queuesRef = collection(db, `shops/${shopId1}/queues`);
@@ -1076,7 +1089,7 @@ const confirmJoinQueue = async () => {
 
     // --- calculate next appointment timestamp
     const customersSnap = await getDocs(
-      collection(db, `shops/${shopId1}/queues/${queueId}/customers`),
+      collection(db, `shops/d3h3Oyzi9bhkoQbww94ldTt0zTp2/queues/${queueId}/customers`),
       
     );
 
