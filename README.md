@@ -36,8 +36,25 @@ Businesses can:
 ---
 
 ## 📂 Project Structure
+NextUp/
+├── src/
+│ ├── components/
+│ ├── screens/
+│ ├── context/
+│ └── utils/
+├── assets/
+└── App.js
 
+yaml
+Copy code
 
+---
+
+## ▶️ Getting Started
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-username/nextup.git
+   cd nextup
 
 
 # Welcome to your Expo app 👋
